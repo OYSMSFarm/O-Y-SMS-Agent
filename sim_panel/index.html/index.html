@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SIM Management Panel</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: #2563eb; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .btn { background: #2563eb; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        .btn:hover { background: #1d4ed8; }
+        .btn-success { background: #10b981; }
+        .btn-danger { background: #ef4444; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f9fafb; }
+        .status-online { color: #10b981; font-weight: bold; }
+        .status-offline { color: #ef4444; font-weight: bold; }
+        .status-unknown { color: #f59e0b; font-weight: bold; }
+        .signal-bar { display: inline-block; width: 8px; height: 12px; background: #10b981; margin-right: 2px; }
+        .signal-bar.low { background: #f59e0b; }
+        .signal-bar.none { background: #ef4444; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 SIM Management Panel</h1>
+        </div>
+
+        <div class="card">
+            <h2>🔍 Scan for Modems</h2>
+            <button class="btn" onclick="scanModems()">Scan Modems</button>
+            <div id="modem-scan"></div>
+        </div>
+
+        <div class="card">
+            <h2>📋 SIM List</h2>
+            <button class="btn btn-success" onclick="loadSims()">Refresh List</button>
+            <table id="sim-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>IMEI</th>
+                        <th>Phone</th>
+                        <th>Provider</th>
+                        <th>Port</th>
+                        <th>Signal</th>
+                        <th>Network</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="sim-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function scanModems() {
+            const response = await fetch('/api/modem/scan');
+            const modems = await response.json();
+            
+            let html = '<h3>Found Modems:</h3><ul>';
+            modems.forEach(m => {
+                html += `<li><strong>${m.port}</strong> - ${m.description} [${m.hwid}] 
+                        <button class="btn btn-success" onclick="probeModem('${m.port}')">Probe</button></li>`;
+            });
+            html += '</ul>';
+            document.getElementById('modem-scan').innerHTML = html;
+        }
+
+        async function probeModem(port) {
+            const response = await fetch(`/api/modem/probe/${port}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                alert(`✅ IMEI: ${data.imei}\n📱 Phone: ${data.phone_number}\n📶 Signal: ${data.signal}\n🌐 Network: ${data.network}`);
+                loadSims();
+            } else {
+                alert(`❌ ${data.error}`);
+            }
+        }
+
+        async function loadSims() {
+            const response = await fetch('/api/sims');
+            const sims = await response.json();
+            
+            let html = '';
+            sims.forEach(sim => {
+                const signalBars = simulateSignalBars(sim.signal_strength || 0);
+                const statusClass = `status-${sim.status}`;
+                
+                html += `
+                <tr>
+                    <td>${sim.id}</td>
+                    <td>${sim.imei || 'N/A'}</td>
+                    <td>${sim.phone_number || 'N/A'}</td>
+                    <td>${sim.provider || 'N/A'}</td>
+                    <td>${sim.port || 'N/A'}</td>
+                    <td>${signalBars}</td>
+                    <td>${sim.registered_network || 'N/A'}</td>
+                    <td class="${statusClass}">${sim.status}</td>
+                    <td>
+                        <button class="btn" onclick="checkBalance(${sim.id})">⚖️ Check Balance</button>
+                        <button class="btn btn-danger" onclick="deleteSim(${sim.id})">🗑️ Delete</button>
+                    </td>
+                </tr>`;
+            });
+            document.getElementById('sim-tbody').innerHTML = html;
+        }
+
+        function simulateSignalBars(signal) {
+            if (signal === null || signal === undefined) return '📶 Off';
+            const bars = Math.ceil(signal / 10);
+            const html = Array(5).fill('<span class="signal-bar"></span>').join('');
+            return html.substring(0, bars * 8) + 'px';
+        }
+
+        async function checkBalance(simId) {
+            const response = await fetch(`/api/sims/${simId}/ussd`);
+            const data = await response.json();
+            
+            if (data.success) {
+                alert(`✅ Balance Check:\n${data.response}`);
+            } else {
+                alert(`❌ ${data.error}`);
+            }
+        }
+
+        async function deleteSim(simId) {
+            if (confirm('Delete this SIM?')) {
+                await fetch(`/api/sims/${simId}`, { method: 'DELETE' });
+                loadSims();
+            }
+        }
+
+        // Load on page load
+        window.onload = loadSims;
+    </script>
+</body>
+</html>
